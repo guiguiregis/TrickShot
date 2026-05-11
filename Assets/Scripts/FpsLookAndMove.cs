@@ -18,9 +18,6 @@ public class FpsLookAndMove : MonoBehaviour
     [SerializeField] float armsReturnSpeed = 0f;
     [SerializeField] float pitchMin = -88f;
     [SerializeField] float pitchMax = 88f;
-    [SerializeField] float moveSpeed = 4.2f;
-    [SerializeField] float sprintMultiplier = 1.55f;
-    [SerializeField] float jumpHeight = 1.2f; // default 1.2m
     [SerializeField] float gravity = -18f;
 
     [Tooltip("After each warp to a launch point, yaw + pitch aim at this target (e.g. hoop).")]
@@ -38,10 +35,7 @@ public class FpsLookAndMove : MonoBehaviour
 
     CharacterController _controller;
     InputActionMap _map;
-    InputAction _move;
     InputAction _look;
-    InputAction _jump;
-    InputAction _sprint;
 
     float _pitch;
     float _yVelocity;
@@ -74,10 +68,7 @@ public class FpsLookAndMove : MonoBehaviour
         if (inputActions == null)
             return;
         _map = inputActions.FindActionMap("Player");
-        _move = _map.FindAction("Move");
         _look = _map.FindAction("Look");
-        _jump = _map.FindAction("Jump");
-        _sprint = _map.FindAction("Sprint");
         _map.Enable();
         TrySubscribeBasket();
     }
@@ -146,42 +137,20 @@ public class FpsLookAndMove : MonoBehaviour
                 armsPivot.localPosition = _armsRestPosition + new Vector3(_armsOffset.x, _armsOffset.y, 0f);
         }
 
-        if (_move == null)
+        if (_controller == null)
             return;
-
-        Vector2 m = _move.ReadValue<Vector2>();
-        Vector3 forward = transform.forward;
-        Vector3 right = transform.right;
-        forward.y = 0f;
-        right.y = 0f;
-        forward.Normalize();
-        right.Normalize();
-
-        float sp = moveSpeed * (_sprint != null && _sprint.IsPressed() ? sprintMultiplier : 1f);
-        Vector3 wish = (forward * m.y + right * m.x) * sp;
 
         if (_controller.isGrounded && _yVelocity < 0f)
             _yVelocity = -2f;
 
-        if (_controller.isGrounded && _jump != null && _jump.WasPressedThisFrame())
-            _yVelocity = Mathf.Sqrt(jumpHeight * -2f * gravity);
-
         _yVelocity += gravity * Time.deltaTime;
-        wish.y = _yVelocity;
-        _controller.Move(wish * Time.deltaTime);
+        _controller.Move(new Vector3(0f, _yVelocity, 0f) * Time.deltaTime);
     }
 
     void ReportDirectiveGameplayInputIfAny()
     {
-        const float moveEpsSq = 0.0004f;
         const float lookEpsSq = 0.01f;
-        if (_move != null && _move.ReadValue<Vector2>().sqrMagnitude > moveEpsSq)
-            GameManager.Instance.NotifyDirectiveGameplayInput();
         if (_look != null && _look.ReadValue<Vector2>().sqrMagnitude > lookEpsSq)
-            GameManager.Instance.NotifyDirectiveGameplayInput();
-        if (_jump != null && _jump.WasPressedThisFrame())
-            GameManager.Instance.NotifyDirectiveGameplayInput();
-        if (_sprint != null && _sprint.IsPressed())
             GameManager.Instance.NotifyDirectiveGameplayInput();
     }
 

@@ -6,6 +6,8 @@ public class NetBallRegistrar : MonoBehaviour
 
     public void RegisterBall(SphereCollider ballCollider)
     {
+        if (netCloth == null || ballCollider == null)
+            return;
         var existing = netCloth.sphereColliders;
         var updated = new ClothSphereColliderPair[existing.Length + 1];
         existing.CopyTo(updated, 0);
@@ -15,6 +17,8 @@ public class NetBallRegistrar : MonoBehaviour
 
     public void UnregisterBall(SphereCollider ballCollider)
     {
+        if (netCloth == null || ballCollider == null)
+            return;
         var filtered = System.Array.FindAll(
             netCloth.sphereColliders,
             p => p.first != ballCollider);

@@ -59,6 +59,7 @@ public class BallFeel : MonoBehaviour
     Vector3 _baseScale;
     bool _baseScaleCaptured;
     TrailRenderer _trail;
+    NetBallRegistrar _netBallReg;
 
     void CaptureBaseScaleIfNeeded()
     {
@@ -79,6 +80,19 @@ public class BallFeel : MonoBehaviour
         CaptureBaseScaleIfNeeded();
         _groundLayer = LayerMask.NameToLayer("Ground");
         SetupMotionTrail();
+        _netBallReg = GetComponent<NetBallRegistrar>();
+    }
+
+    void OnEnable()
+    {
+        if (_col != null && _netBallReg != null)
+            _netBallReg.RegisterBall(_col);
+    }
+
+    void OnDisable()
+    {
+        if (_col != null && _netBallReg != null)
+            _netBallReg.UnregisterBall(_col);
     }
 
     void Update()

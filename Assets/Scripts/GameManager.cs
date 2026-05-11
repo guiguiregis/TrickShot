@@ -42,8 +42,6 @@ public class GameManager : MonoBehaviour
     [Header("Shot Camera (made basket)")]
     [Tooltip("Player camera. If empty: Camera.main at basket time.")]
     [SerializeField] Camera gameplayCamera;
-    [Tooltip("Shake applied to the player camera. If empty, resolved from gameplayCamera / Camera.main.")]
-    [SerializeField] CameraFeel gameplayCameraFeel;
     [SerializeField] Camera shotCamera;
     [SerializeField, Min(0.05f)] float shotCameraHoldSeconds = 1.35f;
     [Header("Audio air ball")]
