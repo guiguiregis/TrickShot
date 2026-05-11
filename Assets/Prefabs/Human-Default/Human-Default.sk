@@ -1,0 +1,23 @@
+Name: Human-Default
+Species: 1
+Parts:
+- Name: SK_SCFI_CIVL_09_15HNDL_HU01
+  PartType: HandLeft
+  PartVersion: 1
+- Name: SK_SCFI_CIVL_09_16HNDR_HU01
+  PartType: HandRight
+  PartVersion: 1
+ColorSet:
+  Species: 1
+  Name: Default
+  SourceColorPath: Assets/Synty/Tools/SidekickCharacters/Resources/Textures/T_ColorMap.png
+  SourceMetallicPath: Assets/Synty/Tools/SidekickCharacters/Resources/Textures/T_MetallicMap.png
+  SourceSmoothnessPath: Assets/Synty/Tools/SidekickCharacters/Resources/Textures/T_SmoothnessMap.png
+  SourceReflectionPath: Assets/Synty/Tools/SidekickCharacters/Resources/Textures/T_ReflectionMap.png
+  SourceEmissionPath: Assets/Synty/Tools/SidekickCharacters/Resources/Textures/T_EmissionMap.png
+  SourceOpacityPath: Assets/Synty/Tools/SidekickCharacters/Resources/Textures/T_OpacityMap.png
+ColorRows: []
+BlendShapes:
+  BodyTypeValue: 100
+  BodySizeValue: 80
+  MuscleValue: -50
