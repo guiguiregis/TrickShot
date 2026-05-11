@@ -13,36 +13,36 @@ public class GameManager : MonoBehaviour
     public bool IsGameOver { get; private set; }
 
     [SerializeField] AudioSource audioSource;
-    [Header("Audio panier (clips)")]
-    [Tooltip("Joué à chaque panier, avant le swish / panier avec cercle.")]
+    [Header("Basket audio (clips)")]
+    [Tooltip("Played on every basket, before swish / rim-contact basket.")]
     [SerializeField] AudioClip scoreImpactClip;
     public GameObject impactEffectVFX;
     [SerializeField] float impactEffectVisibleSeconds = 1.25f;
     [Header("Swish VFX")]
-    [Tooltip("Activé seulement si le panier est un swish (sans contact au cercle).")]
+    [Tooltip("Enabled only when the basket is a swish (no rim contact).")]
     [SerializeField] GameObject swishVFX;
     [SerializeField, Min(0f)] float swishVfxVisibleSeconds = 1.25f;
     [Header("Normal basket VFX")]
-    [Tooltip("Activé quand le panier rapporte des points normaux (pas un swish).")]
+    [Tooltip("Enabled when the basket scores normal points (not a swish).")]
     [SerializeField] GameObject goodScoreVFX;
     [SerializeField, Min(0f)] float goodScoreVfxVisibleSeconds = 1.25f;
-    [Tooltip("Panier swish (sans touche au cercle).")]
+    [Tooltip("Swish basket (no rim touch).")]
     [SerializeField] AudioClip swishClip;
-    [Tooltip("Panier après contact cercle. Si vide, on rejoue swishClip.")]
+    [Tooltip("Basket after rim contact. If empty, swishClip is played again.")]
     [SerializeField] AudioClip scoredWithRimClip;
     [SerializeField] float swishPitchMin = 0.95f;
     [SerializeField] float swishPitchMax = 1.08f;
     [Header("Scoring")]
     [SerializeField, Min(0)] int swishScorePoints = 3;
     [SerializeField, Min(0)] int normalScorePoints = 1;
-    [Header("Freeze frame (panier)")]
-    [Tooltip("Durée réelle (s) où le temps est figé au moment où le ballon entre dans le filet. Min et max : une valeur aléatoire entre les deux à chaque panier.")]
+    [Header("Freeze frame (basket)")]
+    [Tooltip("Real time (s) that time is frozen when the ball enters the net. Min and max: a random value between them on each basket.")]
     [SerializeField, Min(0f)] float scoreFreezeMinRealtime = 0.05f;
     [SerializeField, Min(0f)] float scoreFreezeMaxRealtime = 0.1f;
-    [Header("Shot Camera (panier réussi)")]
-    [Tooltip("Caméra du joueur. Si vide : Camera.main au moment du panier.")]
+    [Header("Shot Camera (made basket)")]
+    [Tooltip("Player camera. If empty: Camera.main at basket time.")]
     [SerializeField] Camera gameplayCamera;
-    [Tooltip("Shake appliqué à la caméra joueur. Si vide, il est résolu depuis gameplayCamera / Camera.main.")]
+    [Tooltip("Shake applied to the player camera. If empty, resolved from gameplayCamera / Camera.main.")]
     [SerializeField] CameraFeel gameplayCameraFeel;
     [SerializeField] Camera shotCamera;
     [SerializeField, Min(0.05f)] float shotCameraHoldSeconds = 1.35f;
@@ -73,7 +73,7 @@ public class GameManager : MonoBehaviour
     [Tooltip("While the round timer is at 10 seconds or below (same window as red pulse / low ticks), drain this many times faster than real time. 1 = no change.")]
     [SerializeField, Min(1f)] float timerLowDrainSpeedMultiplier = 2f;
     [SerializeField, Min(1f)] float roundDurationSeconds = 90f;
-    [Tooltip("Secousse du texte score au panier (temps réel, visible même pendant le freeze frame).")]
+    [Tooltip("Score text shake on basket (real time, visible even during freeze frame).")]
     [SerializeField, Min(0f)] float scoreUiShakeDuration = 0.32f;
     [SerializeField, Min(0f)] float scoreUiShakeMagnitude = 14f;
     [SerializeField, Min(0f)] float scoreUiShakeMagnitudeSwish = 20f;
@@ -84,6 +84,13 @@ public class GameManager : MonoBehaviour
     [SerializeField] Button gameOverQuitButton;
     [Tooltip("If no game over panel is assigned, one is created at runtime (full-screen overlay + score + Restart / Quit).")]
     [SerializeField] bool createGameOverUiIfMissing = true;
+    [Header("Directive hint (idle)")]
+    [Tooltip("UI root (e.g. Canvas child \"Directive\"). Inactive until idle; after the pulse, stays off.")]
+    [SerializeField] GameObject directiveRoot;
+    [SerializeField, Min(0f)] float directiveInactivitySeconds = 3f;
+    [SerializeField, Min(0.05f)] float directivePulseDurationSeconds = 2.25f;
+    [SerializeField, Min(0f)] float directivePulseScaleAmplitude = 0.07f;
+    [SerializeField, Min(0.01f)] float directivePulseSpeed = 7f;
 
     public int Score { get; private set; }
     /// <summary>False until the optional start button is pressed; then true for the rest of the round.</summary>
@@ -93,7 +100,7 @@ public class GameManager : MonoBehaviour
     public event Action OnRoundStarted;
     public event Action<int> OnScoreChanged;
     public event Action<bool> OnBasket;
-    /// <summary>Le ballon a touché le sol (ou été rappelé) après un panier marqué sur ce lancer.</summary>
+    /// <summary>The ball touched the ground (or was recalled) after a made basket on this shot.</summary>
     public event Action OnScoredBallGrounded;
 
     bool _firstBasketCelebrationDone;
@@ -117,6 +124,12 @@ public class GameManager : MonoBehaviour
     Vector3 _timerScaleDefault;
     bool _timerVisualDefaultsCached;
     int _lastTimerDisplayedCeilForTick = int.MinValue;
+
+    bool _directiveConsumed;
+    float _directiveIdleAccum;
+    Coroutine _directiveCoroutine;
+    RectTransform _directiveRt;
+    Vector3 _directiveBaseScale = Vector3.one;
 
     struct ShotCamBackup
     {
@@ -160,6 +173,7 @@ public class GameManager : MonoBehaviour
         RegisterStartButtonListeners();
         UpdateScoreText();
         UpdateTimerText();
+        BootstrapDirectiveHint();
     }
 
     void OnEnable()
@@ -170,6 +184,8 @@ public class GameManager : MonoBehaviour
 
     void Update()
     {
+        UpdateDirectiveHintIdle();
+
         if (IsGameOver || PauseController.IsPaused || !HasRoundStarted)
             return;
 
@@ -227,8 +243,8 @@ public class GameManager : MonoBehaviour
 
         PlayBasketClips(swish);
         var msg = swish
-            ? "SWISH. Le filet n'a même pas bronché."
-            : "Ça rentre. Même un cadre en plastique a flinché.";
+            ? "SWISH. The net didn't even twitch."
+            : "It goes in. Even a plastic rim flinched.";
         Debug.Log($"[Basket] {msg} (+{points}, Score: {Score})");
     }
 
@@ -372,6 +388,7 @@ public class GameManager : MonoBehaviour
         Time.timeScale = 0f;
         ResetTimerHudVisuals();
         StopRoundAudio();
+        CancelDirectiveHintBecauseGameOver();
 
         if (gameOverPanel != null)
             gameOverPanel.SetActive(true);
@@ -527,9 +544,9 @@ public class GameManager : MonoBehaviour
     {
         string[] lines =
         {
-            "Air ball. Les corbeaux au plafond applaudissent.",
-            "Tu as visé la lune, tu as touché le vide.",
-            "Pas de panier, mais un super lancer… de confettis invisibles."
+            "Air ball. The ceiling crows are applauding.",
+            "You aimed for the moon and hit nothing.",
+            "No basket, but a great throw… of invisible confetti."
         };
         Debug.Log($"[Basket] {lines[UnityEngine.Random.Range(0, lines.Length)]}");
         PlayClip(airBallClip);
@@ -573,11 +590,11 @@ public class GameManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Freeze frame au filet puis premier panier (slow-mo) ou hit-stop léger sur les suivants.
+    /// Freeze at the net, then first basket (slow-mo) or a light hit-stop on later ones.
     /// </summary>
     IEnumerator ScoreBasketTimeRoutine(bool firstBasket)
     {
-        // Laisser RegisterBasket terminer (sons / suite du frame) avant Time.timeScale = 0.
+        // Let RegisterBasket finish (audio / rest of frame) before Time.timeScale = 0.
         yield return null;
 
         float hi = Mathf.Max(scoreFreezeMinRealtime, scoreFreezeMaxRealtime);
@@ -818,6 +835,117 @@ public class GameManager : MonoBehaviour
         Cursor.visible = true;
     }
 
+    void BootstrapDirectiveHint()
+    {
+        if (directiveRoot == null)
+        {
+            var found = GameObject.Find("Directive");
+            if (found != null)
+                directiveRoot = found;
+        }
+
+        if (directiveRoot == null)
+            return;
+
+        _directiveRt = directiveRoot.GetComponent<RectTransform>();
+        _directiveBaseScale = _directiveRt != null ? _directiveRt.localScale : directiveRoot.transform.localScale;
+        directiveRoot.SetActive(false);
+        _directiveConsumed = false;
+        _directiveIdleAccum = 0f;
+
+        if (HasRoundStarted)
+            ResetDirectiveIdleTimer();
+    }
+
+    void ResetDirectiveIdleTimer()
+    {
+        if (_directiveConsumed || directiveRoot == null)
+            return;
+        _directiveIdleAccum = 0f;
+    }
+
+    /// <summary>Call from player input (move, look, shoot, etc.) so the Directive idle hint stays reset.</summary>
+    public void NotifyDirectiveGameplayInput()
+    {
+        if (_directiveConsumed || directiveRoot == null || _directiveCoroutine != null)
+            return;
+        _directiveIdleAccum = 0f;
+    }
+
+    void UpdateDirectiveHintIdle()
+    {
+        if (_directiveConsumed || directiveRoot == null)
+            return;
+        if (!HasRoundStarted || IsGameOver || PauseController.IsPaused)
+            return;
+        if (_directiveCoroutine != null)
+            return;
+
+        _directiveIdleAccum += Time.unscaledDeltaTime;
+        if (_directiveIdleAccum >= directiveInactivitySeconds)
+        {
+            _directiveIdleAccum = 0f;
+            _directiveCoroutine = StartCoroutine(DirectivePulseRoutine());
+        }
+    }
+
+    IEnumerator DirectivePulseRoutine()
+    {
+        if (directiveRoot == null)
+        {
+            _directiveCoroutine = null;
+            yield break;
+        }
+
+        directiveRoot.SetActive(true);
+        float end = Time.unscaledTime + directivePulseDurationSeconds;
+
+        while (Time.unscaledTime < end)
+        {
+            if (IsGameOver)
+                break;
+
+            float w = Mathf.Sin(Time.unscaledTime * directivePulseSpeed);
+            float mul = 1f + directivePulseScaleAmplitude * w;
+            if (_directiveRt != null)
+                _directiveRt.localScale = _directiveBaseScale * mul;
+            else
+                directiveRoot.transform.localScale = _directiveBaseScale * mul;
+            yield return null;
+        }
+
+        if (_directiveRt != null)
+            _directiveRt.localScale = _directiveBaseScale;
+        else
+            directiveRoot.transform.localScale = _directiveBaseScale;
+
+        directiveRoot.SetActive(false);
+        _directiveConsumed = true;
+        _directiveCoroutine = null;
+    }
+
+    void CancelDirectiveHintBecauseGameOver()
+    {
+        if (_directiveCoroutine != null)
+        {
+            StopCoroutine(_directiveCoroutine);
+            _directiveCoroutine = null;
+        }
+
+        if (directiveRoot == null)
+        {
+            _directiveConsumed = true;
+            return;
+        }
+
+        if (_directiveRt != null)
+            _directiveRt.localScale = _directiveBaseScale;
+        else
+            directiveRoot.transform.localScale = _directiveBaseScale;
+        directiveRoot.SetActive(false);
+        _directiveConsumed = true;
+    }
+
     public void BeginRoundFromStartUi()
     {
         if (HasRoundStarted || startButton == null)
@@ -837,6 +965,7 @@ public class GameManager : MonoBehaviour
         }
 
         OnRoundStarted?.Invoke();
+        ResetDirectiveIdleTimer();
     }
 
     void RegisterStartButtonListeners()
@@ -859,6 +988,12 @@ public class GameManager : MonoBehaviour
     {
         UnregisterGameOverButtonListeners();
         UnregisterStartButtonListeners();
+
+        if (_directiveCoroutine != null)
+        {
+            StopCoroutine(_directiveCoroutine);
+            _directiveCoroutine = null;
+        }
 
         if (_shotCameraRoutine != null)
         {

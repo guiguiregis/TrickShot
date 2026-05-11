@@ -4,10 +4,10 @@ using UnityEngine;
 public class HoopScoreDetector : MonoBehaviour
 {
     [SerializeField] float minDownwardSpeed = 0.35f;
-    [Tooltip("Marge (m) : le centre du ballon devait être au-dessus du plan d'entrée à l'étape Fixed précédente.")]
+    [Tooltip("Margin (m): ball center had to be above the entry plane on the previous Fixed step.")]
     [SerializeField] float approachEpsilon = 0.03f;
     [SerializeField] bool useCustomEntryPlane;
-    [Tooltip("Hauteur monde Y du plan « par le haut » (si useCustomEntryPlane). Sinon : sommet des bounds du trigger.")]
+    [Tooltip("World Y of the top entry plane (if useCustomEntryPlane). Otherwise: top of the trigger bounds.")]
     [SerializeField] float customEntryPlaneWorldY = 3f;
 
     Collider _trigger;

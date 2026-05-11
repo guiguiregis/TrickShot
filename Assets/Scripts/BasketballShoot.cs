@@ -11,11 +11,11 @@ using UnityEngine.UI;
 [System.Serializable]
 public struct LaunchPositionTuning
 {
-    [Tooltip("Indice d’emplacement de tir (0, 1, 2…). Doit correspondre à « launch position » sur le composant.")]
+    [Tooltip("Shot spot index (0, 1, 2…). Must match launch position on the component.")]
     public int launchPosition;
-    [Tooltip("Multiplie la vitesse vers l’avant pour cet emplacement.")]
+    [Tooltip("Multiplies forward speed for this spot.")]
     [Min(0.01f)] public float launchDistanceMultiplier;
-    [Tooltip("Multiplie le boost vertical pour cet emplacement.")]
+    [Tooltip("Multiplies vertical boost for this spot.")]
     [Min(0f)] public float launchHeightMultiplier;
 }
 
@@ -25,91 +25,91 @@ public class BasketballShoot : MonoBehaviour
     [SerializeField] Rigidbody ball;
     [SerializeField] Transform ballHoldPoint;
     [FormerlySerializedAs("oscillationSpeed")]
-    [Tooltip("Rapidité d'oscillation du slider de puissance (-1↔+1). Plus la valeur est grande, plus le curseur va vite.")]
+    [Tooltip("Power slider oscillation speed (-1↔+1). Higher values move the handle faster.")]
     [SerializeField, Range(0.05f, 10f)]
     float sliderOscillationSpeed = 1.25f;
     [SerializeField] float minLaunchImpulse = 3.5f;
     [SerializeField] float maxLaunchImpulse = 10f;
-    [Tooltip("Hauteur verticale ajoutée au tir (m/s) lorsque la courbe ci-dessous vaut 1.")]
+    [Tooltip("Vertical height added to the shot (m/s) when the curve below evaluates to 1.")]
     [FormerlySerializedAs("arcUpFromCharge")]
     [SerializeField] float maxLaunchHeight = 5f;
-    [Tooltip("Vitesse verticale minimale ajoutée au tir, même quand le slider est à 0.")]
+    [Tooltip("Minimum vertical speed added to the shot, even when the slider is at 0.")]
     [SerializeField] float minLaunchHeight = 0.4f;
-    [Tooltip("Courbe qui mappe la charge normalisée (0–1, dérivée du slider -1…+1) sur la hauteur de tir (0–1). Linéaire par défaut.")]
+    [Tooltip("Curve mapping normalized charge (0–1, from slider -1…+1) to shot height (0–1). Linear by default.")]
     [SerializeField] AnimationCurve heightByCharge = AnimationCurve.Linear(0f, 0f, 1f, 1f);
-    [Tooltip("Si vrai : le slider contrôle à la fois la force (impulsion) et la hauteur du tir. Si faux : la hauteur est fixe (voir charge fixe ci-dessous), seule la force suit le slider.")]
+    [Tooltip("If true: the slider controls both impulse and shot height. If false: height is fixed (see fixed charge below); only force follows the slider.")]
     [SerializeField] bool sliderControlsLaunchHeight = true;
-    [Tooltip("Valeur 0–1 utilisée pour la hauteur lorsque « slider contrôle la hauteur » est désactivé (passée dans heightByCharge comme une charge fictive).")]
+    [Tooltip("0–1 value used for height when slider controls height is off (fed into heightByCharge as a fake charge).")]
     [SerializeField, Range(0f, 1f)] float fixedHeightCharge = 0.5f;
 
-    [Header("Multiplicateurs par emplacement de tir")]
-    [Tooltip("Si renseigné, l’index de tir vient toujours de ce composant (spot actuel après warp). Sinon on utilise « launch position » ci-dessous.")]
+    [Header("Per-spot tuning multipliers")]
+    [Tooltip("If set, shot index always comes from this component (current spot after warp). Otherwise launch position below is used.")]
     [SerializeField] FpsLookAndMove launchIndexSource;
-    [Tooltip("Emplacement actif sans FpsLookAndMove : ligne du tableau dont « launch position » est égal à cette valeur.")]
+    [Tooltip("Active spot without FpsLookAndMove: table row whose launch position equals this value.")]
     [SerializeField] int launchPosition;
-    [Tooltip("Tableau : une ligne par emplacement. Ex. position 0 → distance 0,22 et hauteur 1,89.")]
+    [Tooltip("Table: one row per spot. E.g. position 0 → distance 0.22 and height 1.89.")]
     [SerializeField] LaunchPositionTuning[] launchMultiplierTable;
-    [Tooltip("Si aucune ligne ne correspond à « launch position », ces valeurs sont utilisées.")]
+    [Tooltip("If no row matches launch position, these values are used.")]
     [SerializeField, Min(0.01f)] float defaultLaunchDistanceMultiplier = 1f;
     [SerializeField, Min(0f)] float defaultLaunchHeightMultiplier = 1f;
 
     [SerializeField] float pumpOffset = 0.12f;
     [SerializeField] float pumpDuration = 0.18f;
-    [Header("Idle — avant maintien du tir")]
-    [Tooltip("Amplitude verticale (m, espace local du point de prise) pendant l’attente du clic maintenu.")]
+    [Header("Idle — before hold-to-shoot")]
+    [Tooltip("Vertical amplitude (m, hold point local space) while waiting for the hold click.")]
     [SerializeField, Min(0f)] float idleBobAmplitude = 0.028f;
-    [Tooltip("Vitesse d’oscillation verticale (plus haut = rebonds plus rapides).")]
+    [Tooltip("Vertical bob speed (higher = faster bobs).")]
     [SerializeField, Min(0.01f)] float idleBobSpeed = 2.4f;
-    [Tooltip("Rotation continue (°/s) sur l’axe local Y pendant la même attente (0 = pas de spin).")]
+    [Tooltip("Continuous spin (deg/s) on local Y during the same wait (0 = no spin).")]
     [SerializeField, Min(0f)] float idleSpinDegreesPerSecond = 96f;
-    [Tooltip("Slider affichant la puissance (-1 faible, +1 fort). Laisser vide pour en créer un automatiquement.")]
+    [Tooltip("Slider showing power (-1 weak, +1 strong). Leave empty to create one automatically.")]
     [SerializeField] Slider powerSlider;
     [SerializeField] bool createPowerSliderIfMissing = true;
-    [Tooltip("Secousse du slider de puissance au panier (temps réel).")]
+    [Tooltip("Power slider shake on basket (real time).")]
     [SerializeField, Min(0f)] float powerSliderShakeDuration = 0.32f;
     [SerializeField, Min(0f)] float powerSliderShakeMagnitude = 12f;
     [SerializeField, Min(0f)] float powerSliderShakeMagnitudeSwish = 17f;
     [Header("Audio")]
     [SerializeField] AudioClip LaunchBallAudio;
-    [Tooltip("Joué quand le ballon revient à la main (début de partie ou après rappel au sol).")]
+    [Tooltip("Played when the ball returns to the hand (round start or after ground recall).")]
     [SerializeField] AudioClip ballSpawnAudioClip;
 
-    [Header("Spawn VFX (ballon repris / départ)")]
-    [Tooltip("Optionnel : objet VFX sous le ballon. Si vide, recherche d’un enfant nommé « Spawn ».")]
+    [Header("Spawn VFX (ball picked up / start)")]
+    [Tooltip("Optional: VFX object under the ball. If empty, looks for a child named \"Spawn\".")]
     [SerializeField] GameObject spawnVfxRoot;
-    [Tooltip("Temps réel sans charge ni lâcher après l’apparition du ballon (VFX actif d’abord).")]
+    [Tooltip("Real time with no charge or release after the ball appears (VFX active first).")]
     [SerializeField, Min(0f)] float spawnVfxBlockShootSeconds = 0.4f;
-    [Tooltip("Désactive le VFX après ce délai (maintenu en main). 0 = pas de masquage automatique (masqué au tir ou à la désactivation).")]
+    [Tooltip("Disables the VFX after this delay (while held). 0 = no auto-hide (hidden on shot or when disabled).")]
     [SerializeField, Min(0f)] float spawnVfxAutoHideSeconds = 1.2f;
 
-    [Header("Transparence pendant la charge")]
-    [Tooltip("Racine contenant les renderers à rendre transparents (mains + ballon). Si vide : ballHoldPoint.parent (ArmsPivot).")]
+    [Header("Transparency while charging")]
+    [Tooltip("Root whose renderers fade (hands + ball). If empty: ballHoldPoint.parent (ArmsPivot).")]
     [SerializeField] Transform fadeRoot;
-    [Tooltip("Opacité minimum atteinte au pic de la charge (0 = totalement invisible).")]
+    [Tooltip("Minimum opacity at full charge (0 = fully invisible).")]
     [SerializeField, Range(0f, 1f)] float chargedAlpha = 0.3f;
-    [Tooltip("Vitesse du fondu (plus haut = plus rapide).")]
+    [Tooltip("Fade speed (higher = faster).")]
     [SerializeField, Range(1f, 30f)] float fadeSpeed = 12f;
 
-    [Header("Trajectoire prédite")]
-    [Tooltip("Active l'affichage de la trajectoire prédite pendant la charge du tir.")]
+    [Header("Predicted trajectory")]
+    [Tooltip("Show predicted trajectory while charging the shot.")]
     [SerializeField] bool showTrajectory = true;
-    [Tooltip("LineRenderer utilisé pour dessiner la trajectoire. Laisser vide pour en créer un automatiquement.")]
+    [Tooltip("LineRenderer used to draw the trajectory. Leave empty to create one automatically.")]
     [SerializeField] LineRenderer trajectoryLine;
-    [Tooltip("Nombre de points utilisés pour échantillonner la trajectoire.")]
+    [Tooltip("Number of points used to sample the trajectory.")]
     [SerializeField, Range(8, 128)] int trajectoryResolution = 40;
-    [Tooltip("Durée maximale (en secondes) simulée pour la trajectoire.")]
+    [Tooltip("Maximum simulated time (seconds) for the trajectory.")]
     [SerializeField, Range(0.2f, 5f)] float trajectoryMaxTime = 2.5f;
-    [Tooltip("Si vrai, la ligne s'arrête au premier obstacle physique rencontré.")]
+    [Tooltip("If true, the line stops at the first physics obstacle hit.")]
     [SerializeField] bool trajectoryStopOnHit = true;
-    [Tooltip("Layers pris en compte pour stopper la trajectoire sur collision.")]
+    [Tooltip("Layers considered when stopping the trajectory on collision.")]
     [SerializeField] LayerMask trajectoryCollisionMask = ~0;
-    [Tooltip("Épaisseur de la ligne au début (côté joueur).")]
+    [Tooltip("Line width at the start (player side).")]
     [SerializeField] float trajectoryStartWidth = 0.05f;
-    [Tooltip("Épaisseur de la ligne à la fin (côté panier).")]
+    [Tooltip("Line width at the end (hoop side).")]
     [SerializeField] float trajectoryEndWidth = 0.02f;
-    [Tooltip("Couleur de départ de la ligne.")]
+    [Tooltip("Line start color.")]
     [SerializeField] Color trajectoryStartColor = new Color(1f, 1f, 1f, 0.9f);
-    [Tooltip("Couleur de fin de la ligne (s'estompe).")]
+    [Tooltip("Line end color (fades out).")]
     [SerializeField] Color trajectoryEndColor = new Color(1f, 1f, 1f, 0f);
 
     InputActionMap _map;
@@ -153,7 +153,7 @@ public class BasketballShoot : MonoBehaviour
         SubscribeBasketUiShake();
     }
 
-    /// <summary>Index utilisé pour choisir la ligne du tableau des multiplicateurs (spot actuel sur le terrain).</summary>
+    /// <summary>Index used to pick the multiplier table row (current spot on the court).</summary>
     int ActiveLaunchPositionIndex =>
         launchIndexSource != null ? launchIndexSource.CurrentLaunchIndex : launchPosition;
 
@@ -209,6 +209,17 @@ public class BasketballShoot : MonoBehaviour
 
     void Update()
     {
+        if (GameManager.Instance != null
+            && GameManager.Instance.HasRoundStarted
+            && !PauseController.IsPaused
+            && !GameManager.Instance.IsGameOver)
+        {
+            if (_shoot != null && (_shoot.WasPressedThisFrame() || _shoot.IsPressed()))
+                GameManager.Instance.NotifyDirectiveGameplayInput();
+            if (_pump != null && _pump.WasPressedThisFrame())
+                GameManager.Instance.NotifyDirectiveGameplayInput();
+        }
+
         if (PauseController.IsPaused
             || (GameManager.Instance != null && GameManager.Instance.IsGameOver)
             || (GameManager.Instance != null && !GameManager.Instance.HasRoundStarted))
@@ -787,10 +798,10 @@ public class BasketballShoot : MonoBehaviour
         trajectoryLine.positionCount = 0;
     }
 
-    /// <summary>Change l’emplacement de tir pour les scènes sans <see cref="launchIndexSource"/> ; sinon miroir Inspector / fallback.</summary>
+    /// <summary>Sets shot spot for scenes without <see cref="launchIndexSource"/>; otherwise mirrors Inspector / fallback.</summary>
     public void SetLaunchPosition(int value) => launchPosition = value;
 
-    /// <summary>Bloque le tir (charge + lancer) pendant <paramref name="seconds"/> en temps réel.</summary>
+    /// <summary>Blocks shooting (charge + release) for <paramref name="seconds"/> in real time.</summary>
     public void SetShootLockedForSeconds(float seconds)
     {
         if (seconds <= 0f)

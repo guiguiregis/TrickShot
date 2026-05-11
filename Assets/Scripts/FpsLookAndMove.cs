@@ -7,33 +7,33 @@ public class FpsLookAndMove : MonoBehaviour
 {
     [SerializeField] InputActionAsset inputActions;
     [SerializeField] Transform lookPivot;
-    [Tooltip("Pivot des bras/mains/ballon. Bouge d'abord dans la limite, le surplus va à la caméra.")]
+    [Tooltip("Pivot for arms/hands/ball. Moves within the limit first; overflow goes to the camera.")]
     [SerializeField] Transform armsPivot;
     [SerializeField] float lookSensitivity = 0.12f;
-    [Tooltip("Sensibilité du déplacement local des mains (en unités locales par pixel souris).")]
+    [Tooltip("Sensitivity for local hand movement (local units per mouse pixel).")]
     [SerializeField] float handSensitivity = 0.0035f;
-    [Tooltip("Limite offset bras : X = gauche seulement (pas de seuil à droite), Y = haut seulement (pas en bas).")]
+    [Tooltip("Arm offset limits: X = left only (no limit to the right), Y = up only (not downward).")]
     [SerializeField] Vector2 maxArmsOffset = new Vector2(0.18f, 0.12f);
-    [Tooltip("Vitesse de retour vers le centre quand pas d'input (0 = pas de retour).")]
+    [Tooltip("Return speed toward center when there is no input (0 = no return).")]
     [SerializeField] float armsReturnSpeed = 0f;
     [SerializeField] float pitchMin = -88f;
     [SerializeField] float pitchMax = 88f;
     [SerializeField] float moveSpeed = 4.2f;
     [SerializeField] float sprintMultiplier = 1.55f;
-    [SerializeField] float jumpHeight = 1.2f; // defaut 1.2m
+    [SerializeField] float jumpHeight = 1.2f; // default 1.2m
     [SerializeField] float gravity = -18f;
 
-    [Tooltip("Après chaque warp sur un launch point, yaw + pitch sont réglés pour viser cette cible (ex. panier).")]
+    [Tooltip("After each warp to a launch point, yaw + pitch aim at this target (e.g. hoop).")]
     [SerializeField] Transform lookAtTarget;
 
     [Header("Launch spots")]
-    [Tooltip("Ordre = progression vers le panier. Index 0 = position de départ.")]
+    [Tooltip("Order = progress toward the hoop. Index 0 = starting position.")]
     [SerializeField] Transform[] launchPoints;
-    [Tooltip("Après un panier : délai (s) une fois le ballon au sol et rappelé avant de téléporter au prochain spot.")]
+    [Tooltip("After a basket: delay (s) once the ball hits the ground and is recalled before warping to the next spot.")]
     [SerializeField, Min(0f)] float delayAfterGroundBeforeWarp = 0.12f;
-    [Tooltip("Après la téléportation au prochain spot : délai (s) avant de pouvoir lancer à nouveau.")]
+    [Tooltip("After warping to the next spot: delay (s) before you can shoot again.")]
     [SerializeField, Min(0f)] float delayBeforeNextShotAfterWarp = 0.45f;
-    [Tooltip("Réglage tir / multiplicateurs par spot. Si vide : recherche sur ce GameObject ou ses enfants.")]
+    [Tooltip("Shoot tuning / per-spot multipliers. If empty: resolved on this GameObject or its children.")]
     [SerializeField] BasketballShoot basketballShoot;
 
     CharacterController _controller;
@@ -51,7 +51,7 @@ public class FpsLookAndMove : MonoBehaviour
     bool _pendingLaunchAdvanceAfterScore;
     Coroutine _postScoreRoutine;
 
-    /// <summary>Index du spot de tir actuel (aligné sur l’ordre de <see cref="launchPoints"/>). Utilisé pour les multiplicateurs de tir.</summary>
+    /// <summary>Current launch spot index (matches the order of <see cref="launchPoints"/>). Used for shot multipliers.</summary>
     public int CurrentLaunchIndex => _launchIndex;
 
     void Awake()
@@ -97,7 +97,7 @@ public class FpsLookAndMove : MonoBehaviour
         }
 
         TrySnapToInitialLaunch();
-        // Sans launch points : pivot caméra peut rester incliné dans la scène.
+        // With no launch points: camera pivot may stay tilted as placed in the scene.
         if (launchPoints == null || launchPoints.Length == 0)
         {
             _pitch = 0f;
@@ -109,6 +109,13 @@ public class FpsLookAndMove : MonoBehaviour
 
     void Update()
     {
+        bool roundLive = !PauseController.IsPaused
+            && GameManager.Instance != null
+            && GameManager.Instance.HasRoundStarted
+            && !GameManager.Instance.IsGameOver;
+        if (roundLive)
+            ReportDirectiveGameplayInputIfAny();
+
         if (PauseController.IsPaused
             || (GameManager.Instance != null && GameManager.Instance.IsGameOver)
             || (GameManager.Instance != null && !GameManager.Instance.HasRoundStarted))
@@ -162,6 +169,20 @@ public class FpsLookAndMove : MonoBehaviour
         _yVelocity += gravity * Time.deltaTime;
         wish.y = _yVelocity;
         _controller.Move(wish * Time.deltaTime);
+    }
+
+    void ReportDirectiveGameplayInputIfAny()
+    {
+        const float moveEpsSq = 0.0004f;
+        const float lookEpsSq = 0.01f;
+        if (_move != null && _move.ReadValue<Vector2>().sqrMagnitude > moveEpsSq)
+            GameManager.Instance.NotifyDirectiveGameplayInput();
+        if (_look != null && _look.ReadValue<Vector2>().sqrMagnitude > lookEpsSq)
+            GameManager.Instance.NotifyDirectiveGameplayInput();
+        if (_jump != null && _jump.WasPressedThisFrame())
+            GameManager.Instance.NotifyDirectiveGameplayInput();
+        if (_sprint != null && _sprint.IsPressed())
+            GameManager.Instance.NotifyDirectiveGameplayInput();
     }
 
     float ConsumeYaw(float mouseDeltaX)
@@ -268,8 +289,8 @@ public class FpsLookAndMove : MonoBehaviour
             ApplyLookAtTarget(launch);
         else
         {
-            // Ne prendre que le yaw du repère de lancement : eulerAngles.x sur un empty
-            // peut donner un faux pitch (défaut éditeur, hiérarchie, ambiguïté quaternion).
+            // Only use the launch transform's yaw: eulerAngles.x on an empty
+            // can give a bogus pitch (editor defaults, hierarchy, quaternion ambiguity).
             float yaw = launch.rotation.eulerAngles.y;
             transform.rotation = Quaternion.Euler(0f, yaw, 0f);
             if (resetVerticalLook)
@@ -287,7 +308,7 @@ public class FpsLookAndMove : MonoBehaviour
         _controller.enabled = true;
     }
 
-    /// <summary>Oriente le corps (yaw) vers la cible sur le plan horizontal, puis le pitch du look pivot.</summary>
+    /// <summary>Orients body yaw toward the target on the horizontal plane, then look-pivot pitch.</summary>
     void ApplyLookAtTarget(Transform launchFallback)
     {
         Vector3 origin = transform.position;

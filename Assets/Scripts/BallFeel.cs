@@ -12,26 +12,26 @@ public class BallFeel : MonoBehaviour
     [SerializeField] PhysicsMaterial bounceMaterial;
     [SerializeField] float airBallCheckDelay = 3.2f;
     [SerializeField] float airBallHeight = 1.6f;
-    [Tooltip("Si le centre du ballon passe sous cette hauteur monde, il est retiré du terrain.")]
+    [Tooltip("If the ball center goes below this world height, it is removed from play.")]
     [SerializeField] float belowGroundWorldY = -0.35f;
-    [Tooltip("Temps réel d’attente après le contact sol (ou seuil below ground) avant que le ballon ne soit rappelé à la main.")]
+    [Tooltip("Real-time wait after ground contact (or below-ground threshold) before the ball is recalled to the hand.")]
     [SerializeField, Min(0f)] float delayBeforeRecallFromGround = 0.45f;
-    [Tooltip("Temps réel après l’apparition du VFX « raté » avant de rendre le ballon au joueur (évite que le rappel masque le VFX).")]
+    [Tooltip("Real time after miss VFX appears before returning the ball (avoids recall hiding the VFX).")]
     [SerializeField, Min(0f)] float delayAfterMissShotVfxBeforeBallRecall = 0.55f;
 
-    [Header("Sol — VFX")]
-    [Tooltip("Prefab instancié au point de contact avec le sol (ex. ripple). Laisser vide pour désactiver.")]
+    [Header("Ground — VFX")]
+    [Tooltip("Prefab spawned at ground contact (e.g. ripple). Leave empty to disable.")]
     [SerializeField] GameObject rippleVfx;
-    [Tooltip("Vitesse relative minimale pour jouer le ripple (évite les micro-collisions).")]
+    [Tooltip("Minimum relative speed to play the ripple (avoids micro-collisions).")]
     [SerializeField, Min(0f)] float rippleMinImpactSpeed = 0.35f;
-    [Tooltip("Déplacement le long de la normale au sol (positif = au-dessus de la surface, limite le z-fighting).")]
+    [Tooltip("Offset along ground normal (positive = above surface, reduces z-fighting).")]
     [SerializeField] float rippleSurfaceOffset = 0.02f;
-    [Tooltip("Rotation locale appliquée après alignement sur la normale (ex. 90,0,0 si le prefab est calé différemment).")]
+    [Tooltip("Local rotation after aligning to the normal (e.g. 90,0,0 if the prefab is oriented differently).")]
     [SerializeField] Vector3 ripplePrefabEulerOffset;
 
-    [Header("Traînée en vol")]
+    [Header("Flight trail")]
     [SerializeField] bool motionTrailEnabled = true;
-    [Tooltip("Matériau du TrailRenderer (ex. particules / défaut trail). Laisser vide pour le matériau par défaut d’Unity.")]
+    [Tooltip("TrailRenderer material (e.g. particles / default trail). Leave empty for Unity's default trail material.")]
     [SerializeField] Material trailMaterial;
     [SerializeField, Min(0.01f)] float trailTime = 0.38f;
     [SerializeField, Min(0.001f)] float trailStartWidth = 0.14f;
@@ -42,7 +42,7 @@ public class BallFeel : MonoBehaviour
     [SerializeField] AudioClip backboardClangClip;
     [SerializeField] AudioClip playGroundclip;
     [SerializeField, Range(0f, 1f)] float clangVolume = 0.7f;
-    [Tooltip("Pitch aléatoire à chaque rebond au sol (variation sur le même clip).")]
+    [Tooltip("Random pitch on each ground bounce (variation on the same clip).")]
     [SerializeField, Min(0.05f)] float groundContactPitchMin = 0.88f;
     [SerializeField, Min(0.05f)] float groundContactPitchMax = 1.12f;
 
