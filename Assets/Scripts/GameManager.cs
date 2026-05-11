@@ -113,6 +113,7 @@ public class GameManager : MonoBehaviour
     Vector2 _scoreShakeRestoreAnchored;
     float _roundTimeRemaining;
     bool _backgroundMusicStarted;
+    int _launchScoreMultiplier = 1;
 
     static readonly Color TimerLowPulseRed = new Color(1f, 0.22f, 0.22f);
     const float TimerLowPulseSpeed = 7.5f;
@@ -202,12 +203,20 @@ public class GameManager : MonoBehaviour
         UpdateTimerText();
     }
 
+    /// <summary>Sets the point multiplier for the next made basket from the current shot (from bounce timing). Cleared after scoring or when the ball returns without a score.</summary>
+    public void SetLaunchScoreMultiplier(int multiplier) =>
+        _launchScoreMultiplier = Mathf.Max(1, multiplier);
+
+    public void ClearLaunchScoreMultiplier() => _launchScoreMultiplier = 1;
+
     public void RegisterBasket(bool swish)
     {
         if (IsGameOver || !HasRoundStarted)
             return;
 
-        int points = swish ? swishScorePoints : normalScorePoints;
+        int basePoints = swish ? swishScorePoints : normalScorePoints;
+        int points = basePoints * _launchScoreMultiplier;
+        _launchScoreMultiplier = 1;
         Score += points;
         UpdateScoreText();
         PlayScoreUiShake(swish);
@@ -243,7 +252,7 @@ public class GameManager : MonoBehaviour
         var msg = swish
             ? "SWISH. The net didn't even twitch."
             : "It goes in. Even a plastic rim flinched.";
-        Debug.Log($"[Basket] {msg} (+{points}, Score: {Score})");
+        Debug.Log($"[Basket] {msg} (+{points} pts, Score: {Score})");
     }
 
     void UpdateScoreText()

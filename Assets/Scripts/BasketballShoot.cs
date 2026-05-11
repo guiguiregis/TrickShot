@@ -7,6 +7,7 @@ using UnityEngine.InputSystem.UI;
 using UnityEngine.Rendering;
 using UnityEngine.Serialization;
 using UnityEngine.UI;
+using TMPro;
 
 [System.Serializable]
 public struct LaunchPositionTuning
@@ -69,6 +70,29 @@ public class BasketballShoot : MonoBehaviour
     [SerializeField, Min(0f)] float powerSliderShakeDuration = 0.32f;
     [SerializeField, Min(0f)] float powerSliderShakeMagnitude = 12f;
     [SerializeField, Min(0f)] float powerSliderShakeMagnitudeSwish = 17f;
+    [Header("Bounce timing (Jump / Space)")]
+    [Tooltip("Shows bounce timing (-1…+1). Sweet spot |value| ≤ 0.5 → ×2 points on the next basket after you launch.")]
+    [SerializeField] Slider bounceSlider;
+    [SerializeField] bool createBounceSliderIfMissing = true;
+    [Tooltip("Bounce slider oscillation speed (-1↔+1) while Jump is held.")]
+    [SerializeField, Range(0.05f, 10f)] float bounceSliderOscillationSpeed = 1.35f;
+    [SerializeField, Min(0.05f)] float bounceVisualFrequency = 0.43f;
+    [SerializeField, Min(0.01f)] float bounceVerticalAmplitude = 1.44f;
+    [SerializeField] float bounceProbeForward = 0.5f;
+    [SerializeField] float bounceRaycastStartHeight = 1.4f;
+    [SerializeField] float bounceFloorRayLength = 12f;
+    [SerializeField] LayerMask bounceFloorMask = ~0;
+    [Tooltip("Shows the earned launch score multiplier (x1/x2) right after releasing Space.")]
+    [SerializeField] TextMeshProUGUI scoreMultiplierText;
+    [Header("Bounce audio")]
+    [Tooltip("Optional: plays when the bouncing ball reaches the floor while Jump/Space is held.")]
+    [SerializeField] AudioClip bounceFloorAudioClip;
+    [Tooltip("Only plays again after this many seconds (prevents multi-frame spam at the apex/minimum).")]
+    [SerializeField, Min(0f)] float bounceFloorSoundCooldown = 0.18f;
+    [Tooltip("When computed bounce lift is <= this value, it's considered a 'floor hit'.")]
+    [SerializeField, Min(0f)] float bounceFloorSoundLiftThreshold = 0.05f;
+    [Tooltip("Random pitch variation on each floor sound.")]
+    [SerializeField, Range(0f, 0.5f)] float bounceFloorSoundPitchRandomness = 0.07f;
     [Header("Audio")]
     [SerializeField] AudioClip LaunchBallAudio;
     [Tooltip("Played when the ball returns to the hand (round start or after ground recall).")]
@@ -115,6 +139,7 @@ public class BasketballShoot : MonoBehaviour
     InputActionMap _map;
     InputAction _shoot;
     InputAction _pump;
+    InputAction _jump;
 
     float _lastOscillationValue;
     float _releasedPowerSliderValue;
@@ -137,6 +162,13 @@ public class BasketballShoot : MonoBehaviour
     RectTransform _sliderShakeRt;
     Vector2 _sliderShakeRestoreAnchored;
 
+    float _bounceOscillationStartTime;
+    float _lastBounceOscillationValue;
+    bool _bounceSessionActive;
+    int _pendingLaunchScoreMultiplier = 1;
+    float _lastBounceFloorSoundTime = -999f;
+    bool _bounceWasNearFloor;
+
     void Awake()
     {
         if (launchIndexSource == null)
@@ -148,6 +180,15 @@ public class BasketballShoot : MonoBehaviour
             EnsurePowerSliderUi();
         else if (powerSlider != null)
             ConfigureSlider(powerSlider);
+
+        if (createBounceSliderIfMissing && bounceSlider == null && powerSlider != null)
+            CreateBounceSliderUnderParent(powerSlider.transform.parent);
+        else if (bounceSlider != null)
+            ConfigureSlider(bounceSlider);
+
+        if (scoreMultiplierText == null)
+            scoreMultiplierText = ResolveScoreMultiplierTextFromScene();
+        SetScoreMultiplierDisplay(false);
 
         EnsureTrajectoryLine();
         SubscribeBasketUiShake();
@@ -164,6 +205,7 @@ public class BasketballShoot : MonoBehaviour
         _map = inputActions.FindActionMap("Player");
         _shoot = _map.FindAction("Shoot");
         _pump = _map.FindAction("Pump");
+        _jump = _map.FindAction("Jump");
         _map.Enable();
         _feel = ball.GetComponent<BallFeel>();
         _ballCollider = ball.GetComponent<Collider>();
@@ -186,6 +228,7 @@ public class BasketballShoot : MonoBehaviour
     void OnDisable()
     {
         UnsubscribeBasketUiShake();
+        SetScoreMultiplierDisplay(false);
         if (GameManager.Instance != null)
             GameManager.Instance.OnRoundStarted -= OnRoundStartedPlaySpawnSfx;
         StopSpawnVfxHideRoutine();
@@ -218,6 +261,8 @@ public class BasketballShoot : MonoBehaviour
                 GameManager.Instance.NotifyDirectiveGameplayInput();
             if (_pump != null && _pump.WasPressedThisFrame())
                 GameManager.Instance.NotifyDirectiveGameplayInput();
+            if (_jump != null && (_jump.WasPressedThisFrame() || _jump.IsPressed()))
+                GameManager.Instance.NotifyDirectiveGameplayInput();
         }
 
         if (PauseController.IsPaused
@@ -231,7 +276,8 @@ public class BasketballShoot : MonoBehaviour
         if (!_feel.IsHeld)
             return;
 
-        if (!_pumpAnim && _pump != null && _pump.WasPressedThisFrame() && !_shoot.IsPressed())
+        if (!_pumpAnim && _pump != null && _pump.WasPressedThisFrame() && !_shoot.IsPressed()
+            && (_jump == null || !_jump.IsPressed()))
             StartCoroutine(PumpRoutine());
 
         if (_pumpAnim)
@@ -251,8 +297,31 @@ public class BasketballShoot : MonoBehaviour
                 UpdateFade(1f);
                 HideTrajectory();
             }
+
+            AbortBounceSessionVisualOnly();
             return;
         }
+
+        bool jumpHeld = _jump != null && _jump.IsPressed();
+
+        if (jumpHeld)
+        {
+            if (_oscillationActive)
+            {
+                _oscillationActive = false;
+                _feel.ResetSquash();
+                _sliderShowsReleasedShot = false;
+                SetSliderDisplay(0f);
+                UpdateFade(1f);
+                HideTrajectory();
+            }
+
+            UpdateBounceHold();
+            return;
+        }
+
+        if (_bounceSessionActive)
+            FinishBounceSessionOnJumpReleased();
 
         if (_shoot.WasPressedThisFrame())
             _sliderShowsReleasedShot = false;
@@ -303,6 +372,9 @@ public class BasketballShoot : MonoBehaviour
             return;
 
         if (ball == null || ballHoldPoint == null || _feel == null || !_feel.IsHeld || _pumpAnim)
+            return;
+
+        if (_jump != null && _jump.IsPressed())
             return;
 
         bool charging = _shoot != null && _shoot.IsPressed();
@@ -363,6 +435,9 @@ public class BasketballShoot : MonoBehaviour
         _feel.NotifyReleased();
         ball.linearVelocity = vel;
         ball.angularVelocity = Random.insideUnitSphere * 3f * charge01;
+        GameManager.Instance?.SetLaunchScoreMultiplier(_pendingLaunchScoreMultiplier);
+        _pendingLaunchScoreMultiplier = 1;
+        SetScoreMultiplierDisplay(false);
         if (LaunchBallAudio != null)
             AudioSource.PlayClipAtPoint(LaunchBallAudio, ball.position);
 
@@ -392,6 +467,8 @@ public class BasketballShoot : MonoBehaviour
     {
         if (ball == null || ballHoldPoint == null)
             return;
+        AbortBounceSessionVisualOnly();
+        GameManager.Instance?.ClearLaunchScoreMultiplier();
         ball.isKinematic = true;
         ball.transform.SetParent(ballHoldPoint);
         ball.transform.localPosition = Vector3.zero;
@@ -403,6 +480,7 @@ public class BasketballShoot : MonoBehaviour
         _feel?.SetHeld(true);
         _feel?.ResetSquash();
         _sliderShowsReleasedShot = false;
+        _bounceWasNearFloor = false;
         SetSliderDisplay(0f);
         ApplyAlpha(1f, true);
         PlaySpawnVfxAndGateShoot();
@@ -415,6 +493,178 @@ public class BasketballShoot : MonoBehaviour
         if (powerSlider == null)
             return;
         powerSlider.SetValueWithoutNotify(Mathf.Clamp(value, -1f, 1f));
+    }
+
+    void SetBounceSliderDisplay(float value)
+    {
+        if (bounceSlider == null)
+            return;
+        bounceSlider.SetValueWithoutNotify(Mathf.Clamp(value, -1f, 1f));
+    }
+
+    void SetScoreMultiplierDisplay(bool visible, int multiplier = 1)
+    {
+        if (scoreMultiplierText == null)
+            return;
+
+        if (visible)
+            scoreMultiplierText.text = $"x{Mathf.Max(1, multiplier)}";
+        scoreMultiplierText.gameObject.SetActive(visible);
+    }
+
+    TextMeshProUGUI ResolveScoreMultiplierTextFromScene()
+    {
+        var allTmp = Object.FindObjectsByType<TextMeshProUGUI>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        for (int i = 0; i < allTmp.Length; i++)
+        {
+            var tmp = allTmp[i];
+            if (tmp == null)
+                continue;
+            string n = tmp.name.ToLowerInvariant();
+            if (n.Contains("multiplier"))
+                return tmp;
+        }
+
+        return null;
+    }
+
+    void UpdateBounceHold()
+    {
+        if (!_bounceSessionActive)
+            _bounceOscillationStartTime = Time.time;
+        _bounceSessionActive = true;
+
+        _lastBounceOscillationValue = Mathf.Lerp(-1f, 1f,
+            Mathf.PingPong((Time.time - _bounceOscillationStartTime) * bounceSliderOscillationSpeed, 1f));
+        SetBounceSliderDisplay(_lastBounceOscillationValue);
+
+        float phase = Time.time * bounceVisualFrequency * Mathf.PI * 2f;
+        float lift = bounceVerticalAmplitude * Mathf.Abs(Mathf.Sin(phase));
+
+        bool floorFound = TryGetBounceFloorPoint(out Vector3 floor);
+        if (floorFound)
+        {
+            ball.transform.SetParent(null);
+            float clearance = BallWorldVerticalHalfExtent();
+            ball.transform.SetPositionAndRotation(
+                floor + Vector3.up * (clearance + lift),
+                Quaternion.identity);
+        }
+        else
+        {
+            ball.transform.SetParent(ballHoldPoint);
+            ball.transform.localPosition = new Vector3(0f, lift * 0.55f, 0f);
+            ball.transform.localRotation = Quaternion.identity;
+        }
+
+        // During the bounce preview the ball is kinematic and the collider is disabled,
+        // so real collision events won't fire. Instead, approximate "floor hits"
+        // by detecting when the computed lift is near zero.
+        if (floorFound && bounceFloorAudioClip != null)
+        {
+            bool nearFloor = lift <= bounceFloorSoundLiftThreshold;
+            if (nearFloor && !_bounceWasNearFloor
+                && Time.time - _lastBounceFloorSoundTime >= bounceFloorSoundCooldown)
+            {
+                _lastBounceFloorSoundTime = Time.time;
+                float pitch = 1f + Random.Range(-bounceFloorSoundPitchRandomness, bounceFloorSoundPitchRandomness);
+                var pos = floor + Vector3.up * 0.01f;
+                // Unity version: PlayClipAtPoint may return void, so create a temp source for pitch control.
+                var go = new GameObject("BounceFloorTempAudio");
+                go.transform.position = pos;
+                var src = go.AddComponent<AudioSource>();
+                src.clip = bounceFloorAudioClip;
+                src.volume = 1f;
+                src.pitch = pitch;
+                src.Play();
+                float life = Mathf.Max(0.1f, bounceFloorAudioClip != null ? bounceFloorAudioClip.length : 0.1f);
+                Destroy(go, life);
+
+                // For now we just fire-and-forget.
+            }
+
+            _bounceWasNearFloor = nearFloor;
+        }
+        else
+        {
+            _bounceWasNearFloor = false;
+        }
+
+        ball.isKinematic = true;
+        if (_ballCollider != null)
+            _ballCollider.enabled = false;
+    }
+
+    void FinishBounceSessionOnJumpReleased()
+    {
+        _bounceSessionActive = false;
+        float v = Mathf.Clamp(_lastBounceOscillationValue, -1f, 1f);
+        _pendingLaunchScoreMultiplier = Mathf.Abs(v) <= 0.5f ? 2 : 1;
+        SetScoreMultiplierDisplay(true, _pendingLaunchScoreMultiplier);
+        SnapHeldBallToHandLayout();
+        SetBounceSliderDisplay(0f);
+        _feel?.ResetSquash();
+        _bounceWasNearFloor = false;
+    }
+
+    void AbortBounceSessionVisualOnly()
+    {
+        if (_bounceSessionActive)
+        {
+            _bounceSessionActive = false;
+            SnapHeldBallToHandLayout();
+            _feel?.ResetSquash();
+        }
+
+        SetBounceSliderDisplay(0f);
+        SetScoreMultiplierDisplay(false);
+        _bounceWasNearFloor = false;
+    }
+
+    void SnapHeldBallToHandLayout()
+    {
+        if (ball == null || ballHoldPoint == null)
+            return;
+        ball.transform.SetParent(ballHoldPoint);
+        ball.transform.localPosition = Vector3.zero;
+        ball.transform.localRotation = Quaternion.identity;
+        ball.linearVelocity = Vector3.zero;
+        ball.angularVelocity = Vector3.zero;
+        ball.isKinematic = true;
+        if (_ballCollider != null)
+            _ballCollider.enabled = false;
+    }
+
+    bool TryGetBounceFloorPoint(out Vector3 floorPoint)
+    {
+        floorPoint = default;
+        if (ballHoldPoint == null)
+            return false;
+
+        Vector3 start = ballHoldPoint.position
+            + ballHoldPoint.forward * bounceProbeForward
+            + Vector3.up * bounceRaycastStartHeight;
+        if (!Physics.Raycast(start, Vector3.down, out RaycastHit hit, bounceFloorRayLength, bounceFloorMask,
+                QueryTriggerInteraction.Ignore))
+            return false;
+
+        floorPoint = hit.point;
+        return true;
+    }
+
+    float BallWorldVerticalHalfExtent()
+    {
+        if (_ballCollider is SphereCollider sc)
+        {
+            Vector3 ls = sc.transform.lossyScale;
+            float r = sc.radius * Mathf.Max(Mathf.Abs(ls.x), Mathf.Abs(ls.y), Mathf.Abs(ls.z));
+            return r;
+        }
+
+        if (_ballCollider != null)
+            return _ballCollider.bounds.extents.y;
+
+        return 0.12f;
     }
 
     void SubscribeBasketUiShake()
@@ -663,6 +913,75 @@ public class BasketballShoot : MonoBehaviour
 
         powerSlider = slider;
         ConfigureSlider(powerSlider);
+
+        if (createBounceSliderIfMissing && bounceSlider == null)
+            CreateBounceSliderUnderParent(canvasGo.transform);
+    }
+
+    void CreateBounceSliderUnderParent(Transform parent)
+    {
+        if (parent == null)
+            return;
+
+        var sliderRoot = new GameObject("SliderBounce");
+        sliderRoot.transform.SetParent(parent, false);
+        var rootRt = sliderRoot.AddComponent<RectTransform>();
+        rootRt.anchorMin = new Vector2(0.22f, 0.1f);
+        rootRt.anchorMax = new Vector2(0.78f, 0.132f);
+        rootRt.offsetMin = Vector2.zero;
+        rootRt.offsetMax = Vector2.zero;
+
+        var slider = sliderRoot.AddComponent<Slider>();
+        slider.transition = Selectable.Transition.None;
+        slider.interactable = false;
+        slider.minValue = -1f;
+        slider.maxValue = 1f;
+        slider.direction = Slider.Direction.LeftToRight;
+
+        var bg = new GameObject("Background");
+        bg.transform.SetParent(sliderRoot.transform, false);
+        var bgRt = bg.AddComponent<RectTransform>();
+        StretchRect(bgRt);
+        var bgImg = bg.AddComponent<Image>();
+        bgImg.color = new Color(0.1f, 0.14f, 0.16f, 0.92f);
+
+        var fillArea = new GameObject("Fill Area");
+        fillArea.transform.SetParent(sliderRoot.transform, false);
+        var fillAreaRt = fillArea.AddComponent<RectTransform>();
+        StretchRect(fillAreaRt);
+        fillAreaRt.offsetMin = new Vector2(6, 6);
+        fillAreaRt.offsetMax = new Vector2(-6, -6);
+
+        var fill = new GameObject("Fill");
+        fill.transform.SetParent(fillArea.transform, false);
+        var fillRt = fill.AddComponent<RectTransform>();
+        fillRt.anchorMin = Vector2.zero;
+        fillRt.anchorMax = Vector2.one;
+        fillRt.offsetMin = Vector2.zero;
+        fillRt.offsetMax = Vector2.zero;
+        var fillImg = fill.AddComponent<Image>();
+        fillImg.color = new Color(0.28f, 0.86f, 0.98f, 1f);
+
+        slider.fillRect = fillRt;
+        slider.targetGraphic = fillImg;
+
+        var handleSlide = new GameObject("Handle Slide Area");
+        handleSlide.transform.SetParent(sliderRoot.transform, false);
+        var hsRt = handleSlide.AddComponent<RectTransform>();
+        StretchRect(hsRt);
+        var handle = new GameObject("Handle");
+        handle.transform.SetParent(handleSlide.transform, false);
+        var hRt = handle.AddComponent<RectTransform>();
+        hRt.anchorMin = new Vector2(0, 0);
+        hRt.anchorMax = new Vector2(0, 1);
+        hRt.pivot = new Vector2(0.5f, 0.5f);
+        hRt.sizeDelta = new Vector2(18f, 0f);
+        var hImg = handle.AddComponent<Image>();
+        hImg.color = new Color(1f, 1f, 1f, 0f);
+        slider.handleRect = hRt;
+
+        bounceSlider = slider;
+        ConfigureSlider(bounceSlider);
     }
 
     static void StretchRect(RectTransform rt)
