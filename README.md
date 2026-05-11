@@ -95,6 +95,10 @@ Platform: **PC (Non-VR)**
 
 A standalone PC build is included alongside this repository.
 
+### Téléchargement (Google Drive)
+
+Archive du projet / build : [**TrickShot.zip**](https://drive.google.com/file/d/1JjTUZkJ5_ztDgGdsi-GxaSOBD4WD9zqx/view?usp=share_link)
+
 ### Running from Source
 
 1. Open the project in **Unity 6000.0.58f2**
