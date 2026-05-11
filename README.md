@@ -114,4 +114,4 @@ A standalone PC build is included alongside this repository.
 
 ## Author
 
-Built by **[Your Name]** for the Squido Gameplay Programmer test.
+Built by **GUILLAUME SENOU** for the Squido Gameplay Programmer test.
