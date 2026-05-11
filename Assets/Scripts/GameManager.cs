@@ -12,6 +12,9 @@ public class GameManager : MonoBehaviour
     /// <summary>True after the round timer hits zero until the scene is restarted.</summary>
     public bool IsGameOver { get; private set; }
 
+    /// <summary>True when time is up but a shoot-released ball is still in the air (not on Ground); outcome pending score or miss ground.</summary>
+    public bool IsAwaitingLastActionOutcome { get; private set; }
+
     [SerializeField] AudioSource audioSource;
     [Header("Basket audio (clips)")]
     [Tooltip("Played on every basket, before swish / rim-contact basket.")]
@@ -35,6 +38,8 @@ public class GameManager : MonoBehaviour
     [Header("Scoring")]
     [SerializeField, Min(0)] int swishScorePoints = 3;
     [SerializeField, Min(0)] int normalScorePoints = 1;
+    [Tooltip("Points for a basket made after the round timer hit zero (ball already in flight).")]
+    [SerializeField, Min(0)] int lastActionBuzzerPoints = 1;
     [Header("Freeze frame (basket)")]
     [Tooltip("Real time (s) that time is frozen when the ball enters the net. Min and max: a random value between them on each basket.")]
     [SerializeField, Min(0f)] float scoreFreezeMinRealtime = 0.05f;
@@ -71,6 +76,12 @@ public class GameManager : MonoBehaviour
     [Tooltip("While the round timer is at 10 seconds or below (same window as red pulse / low ticks), drain this many times faster than real time. 1 = no change.")]
     [SerializeField, Min(1f)] float timerLowDrainSpeedMultiplier = 2f;
     [SerializeField, Min(1f)] float roundDurationSeconds = 90f;
+    [Header("Round end buzzer")]
+    [Tooltip("Played when the round timer first hits zero, and again when the round ends after last-action (miss ground or basket celebration finished). Leave empty to disable.")]
+    [SerializeField] AudioClip roundEndBuzzerClip;
+    [SerializeField, Range(0f, 1f)] float roundEndBuzzerVolume = 1f;
+    [Tooltip("Ball used for buzzer rule: timer at 0 only defers game over if this ball was shoot-released and is not touching Ground. Auto-filled if empty.")]
+    [SerializeField] BallFeel roundBallFeel;
     [Tooltip("Score text shake on basket (real time, visible even during freeze frame).")]
     [SerializeField, Min(0f)] float scoreUiShakeDuration = 0.32f;
     [SerializeField, Min(0f)] float scoreUiShakeMagnitude = 14f;
@@ -109,9 +120,12 @@ public class GameManager : MonoBehaviour
     Coroutine _missShotVfxRoutine;
     Coroutine _shotCameraRoutine;
     Coroutine _scoreShakeRoutine;
+    Coroutine _lastActionGameOverAfterBasketRoutine;
+    Coroutine _showGameOverUiAfterBuzzerRoutine;
     RectTransform _scoreShakeRt;
     Vector2 _scoreShakeRestoreAnchored;
     float _roundTimeRemaining;
+    bool _pendingBuzzerAfterStopForTimerGameOver;
     bool _backgroundMusicStarted;
     int _launchScoreMultiplier = 1;
 
@@ -158,6 +172,9 @@ public class GameManager : MonoBehaviour
         if (audioSource == null)
             audioSource = GetComponent<AudioSource>();
 
+        if (roundBallFeel == null)
+            roundBallFeel = FindFirstObjectByType<BallFeel>();
+
         _roundTimeRemaining = roundDurationSeconds;
         _lastTimerDisplayedCeilForTick = int.MinValue;
         if (gameOverPanel == null && createGameOverUiIfMissing)
@@ -188,14 +205,32 @@ public class GameManager : MonoBehaviour
         if (IsGameOver || PauseController.IsPaused || !HasRoundStarted)
             return;
 
-        float dt = Time.unscaledDeltaTime;
-        if (_roundTimeRemaining <= 10f)
-            dt *= timerLowDrainSpeedMultiplier;
-        _roundTimeRemaining -= dt;
-        if (_roundTimeRemaining <= 0f)
+        if (IsAwaitingLastActionOutcome)
         {
             _roundTimeRemaining = 0f;
             UpdateTimerText();
+            return;
+        }
+
+        float dt = Time.unscaledDeltaTime;
+        if (_roundTimeRemaining <= 10f)
+            dt *= timerLowDrainSpeedMultiplier;
+        float beforeRemaining = _roundTimeRemaining;
+        _roundTimeRemaining -= dt;
+        if (_roundTimeRemaining <= 0f)
+        {
+            bool timerJustCrossedZero = beforeRemaining > 0f;
+            _roundTimeRemaining = 0f;
+            UpdateTimerText();
+            if (roundBallFeel != null && roundBallFeel.IsAirborneAfterShootRelease)
+            {
+                IsAwaitingLastActionOutcome = true;
+                if (timerJustCrossedZero)
+                    PlayRoundEndBuzzerClip();
+                return;
+            }
+
+            _pendingBuzzerAfterStopForTimerGameOver = timerJustCrossedZero;
             TriggerGameOver();
             return;
         }
@@ -214,8 +249,9 @@ public class GameManager : MonoBehaviour
         if (IsGameOver || !HasRoundStarted)
             return;
 
+        bool lastActionBuzzer = IsAwaitingLastActionOutcome;
         int basePoints = swish ? swishScorePoints : normalScorePoints;
-        int points = basePoints * _launchScoreMultiplier;
+        int points = lastActionBuzzer ? lastActionBuzzerPoints : basePoints * _launchScoreMultiplier;
         _launchScoreMultiplier = 1;
         Score += points;
         UpdateScoreText();
@@ -253,6 +289,21 @@ public class GameManager : MonoBehaviour
             ? "SWISH. The net didn't even twitch."
             : "It goes in. Even a plastic rim flinched.";
         Debug.Log($"[Basket] {msg} (+{points} pts, Score: {Score})");
+
+        if (lastActionBuzzer)
+        {
+            if (_lastActionGameOverAfterBasketRoutine != null)
+                StopCoroutine(_lastActionGameOverAfterBasketRoutine);
+            _lastActionGameOverAfterBasketRoutine = StartCoroutine(LastActionGameOverAfterBasketRoutine());
+        }
+    }
+
+    IEnumerator LastActionGameOverAfterBasketRoutine()
+    {
+        while (_hitStopRoutine != null)
+            yield return null;
+        _lastActionGameOverAfterBasketRoutine = null;
+        TriggerGameOver();
     }
 
     void UpdateScoreText()
@@ -309,7 +360,7 @@ public class GameManager : MonoBehaviour
     {
         if (timerLowSecondTickClip == null || audioSource == null)
             return;
-        if (!HasRoundStarted || IsGameOver || PauseController.IsPaused)
+        if (!HasRoundStarted || IsGameOver || IsAwaitingLastActionOutcome || PauseController.IsPaused)
             return;
 
         if (_lastTimerDisplayedCeilForTick == int.MinValue)
@@ -340,6 +391,16 @@ public class GameManager : MonoBehaviour
         audioSource.pitch = p;
     }
 
+    void PlayRoundEndBuzzerClip()
+    {
+        if (roundEndBuzzerClip == null || audioSource == null)
+            return;
+        float p = audioSource.pitch;
+        audioSource.pitch = 1f;
+        audioSource.PlayOneShot(roundEndBuzzerClip, roundEndBuzzerVolume);
+        audioSource.pitch = p;
+    }
+
     void EnsureTimerHudDefaultsCached()
     {
         if (timerTxt == null || _timerVisualDefaultsCached)
@@ -364,7 +425,7 @@ public class GameManager : MonoBehaviour
         if (timerTxt == null || !_timerVisualDefaultsCached)
             return;
 
-        if (IsGameOver || !HasRoundStarted || displayedSecondsCeiled > 10)
+        if (IsGameOver || IsAwaitingLastActionOutcome || !HasRoundStarted || displayedSecondsCeiled > 10)
         {
             timerTxt.color = _timerColorDefault;
             timerTxt.rectTransform.localScale = _timerScaleDefault;
@@ -391,18 +452,58 @@ public class GameManager : MonoBehaviour
         if (IsGameOver)
             return;
 
+        bool lastActionGameOver = IsAwaitingLastActionOutcome;
+        IsAwaitingLastActionOutcome = false;
+        if (_lastActionGameOverAfterBasketRoutine != null)
+        {
+            StopCoroutine(_lastActionGameOverAfterBasketRoutine);
+            _lastActionGameOverAfterBasketRoutine = null;
+        }
+
+        if (_showGameOverUiAfterBuzzerRoutine != null)
+        {
+            StopCoroutine(_showGameOverUiAfterBuzzerRoutine);
+            _showGameOverUiAfterBuzzerRoutine = null;
+        }
+
         IsGameOver = true;
         Time.timeScale = 0f;
         ResetTimerHudVisuals();
         StopRoundAudio();
+
+        bool playRoundEndBuzzer = lastActionGameOver || _pendingBuzzerAfterStopForTimerGameOver;
+        _pendingBuzzerAfterStopForTimerGameOver = false;
+
+        float gameOverUiDelayRealtime = 0f;
+        if (playRoundEndBuzzer && roundEndBuzzerClip != null && audioSource != null)
+        {
+            PlayRoundEndBuzzerClip();
+            gameOverUiDelayRealtime = roundEndBuzzerClip.length;
+        }
+
         CancelDirectiveHintBecauseGameOver();
 
+        if (gameOverUiDelayRealtime > 0f)
+            _showGameOverUiAfterBuzzerRoutine = StartCoroutine(ShowGameOverUiAfterBuzzerRoutine(gameOverUiDelayRealtime));
+        else
+            ShowGameOverUi();
+    }
+
+    void ShowGameOverUi()
+    {
         if (gameOverPanel != null)
             gameOverPanel.SetActive(true);
 
         UpdateGameOverScoreText();
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;
+    }
+
+    IEnumerator ShowGameOverUiAfterBuzzerRoutine(float delayRealtimeSeconds)
+    {
+        yield return new WaitForSecondsRealtime(delayRealtimeSeconds);
+        _showGameOverUiAfterBuzzerRoutine = null;
+        ShowGameOverUi();
     }
 
     /// <summary>Same as pause menu Restart: reload the active scene.</summary>
@@ -561,6 +662,9 @@ public class GameManager : MonoBehaviour
 
     public void NotifyMissedShot(Vector3 missWorldPosition)
     {
+        if (IsAwaitingLastActionOutcome)
+            TriggerGameOver();
+
         if (missShotVfxSpawnPoint == null)
             return;
 
@@ -883,7 +987,7 @@ public class GameManager : MonoBehaviour
     {
         if (_directiveConsumed || directiveRoot == null)
             return;
-        if (!HasRoundStarted || IsGameOver || PauseController.IsPaused)
+        if (!HasRoundStarted || IsGameOver || IsAwaitingLastActionOutcome || PauseController.IsPaused)
             return;
         if (_directiveCoroutine != null)
             return;
@@ -1007,6 +1111,18 @@ public class GameManager : MonoBehaviour
             StopCoroutine(_shotCameraRoutine);
             _shotCameraRoutine = null;
             //RestoreShotCameraView();
+        }
+
+        if (_lastActionGameOverAfterBasketRoutine != null)
+        {
+            StopCoroutine(_lastActionGameOverAfterBasketRoutine);
+            _lastActionGameOverAfterBasketRoutine = null;
+        }
+
+        if (_showGameOverUiAfterBuzzerRoutine != null)
+        {
+            StopCoroutine(_showGameOverUiAfterBuzzerRoutine);
+            _showGameOverUiAfterBuzzerRoutine = null;
         }
     }
 }

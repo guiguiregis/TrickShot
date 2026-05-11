@@ -255,7 +255,8 @@ public class BasketballShoot : MonoBehaviour
         if (GameManager.Instance != null
             && GameManager.Instance.HasRoundStarted
             && !PauseController.IsPaused
-            && !GameManager.Instance.IsGameOver)
+            && !GameManager.Instance.IsGameOver
+            && !GameManager.Instance.IsAwaitingLastActionOutcome)
         {
             if (_shoot != null && (_shoot.WasPressedThisFrame() || _shoot.IsPressed()))
                 GameManager.Instance.NotifyDirectiveGameplayInput();
@@ -267,6 +268,7 @@ public class BasketballShoot : MonoBehaviour
 
         if (PauseController.IsPaused
             || (GameManager.Instance != null && GameManager.Instance.IsGameOver)
+            || (GameManager.Instance != null && GameManager.Instance.IsAwaitingLastActionOutcome)
             || (GameManager.Instance != null && !GameManager.Instance.HasRoundStarted))
             return;
 
@@ -368,6 +370,7 @@ public class BasketballShoot : MonoBehaviour
     {
         if (PauseController.IsPaused
             || (GameManager.Instance != null && GameManager.Instance.IsGameOver)
+            || (GameManager.Instance != null && GameManager.Instance.IsAwaitingLastActionOutcome)
             || (GameManager.Instance != null && !GameManager.Instance.HasRoundStarted))
             return;
 

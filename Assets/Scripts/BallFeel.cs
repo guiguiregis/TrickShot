@@ -9,6 +9,13 @@ public class BallFeel : MonoBehaviour
     public bool ScoredThisLaunch { get; private set; }
     public bool HadRimContactRecently => Time.time - _lastRimHitTime < 0.22f;
 
+    /// <summary>
+    /// True after a shoot release until the ball is held again or touches the Ground layer (including resting on the floor).
+    /// Used for buzzer "last action" when the round timer hits zero.
+    /// </summary>
+    public bool IsAirborneAfterShootRelease =>
+        _wasReleasedFromShoot && !IsHeld && _shotGroundContactCount == 0;
+
     [SerializeField] PhysicsMaterial bounceMaterial;
     [SerializeField] float airBallCheckDelay = 3.2f;
     [SerializeField] float airBallHeight = 1.6f;
@@ -56,6 +63,8 @@ public class BallFeel : MonoBehaviour
     bool _groundRecallScheduled;
     Coroutine _delayedGroundRecallRoutine;
     float _lastRimHitTime = -100f;
+    bool _wasReleasedFromShoot;
+    int _shotGroundContactCount;
     Vector3 _baseScale;
     bool _baseScaleCaptured;
     TrailRenderer _trail;
@@ -134,6 +143,8 @@ public class BallFeel : MonoBehaviour
             ScoredThisLaunch = false;
             _airBallNotified = false;
             _groundRecallDone = false;
+            _wasReleasedFromShoot = false;
+            _shotGroundContactCount = 0;
             _rb.linearVelocity = Vector3.zero;
             _rb.angularVelocity = Vector3.zero;
             CancelDelayedGroundRecall();
@@ -145,6 +156,8 @@ public class BallFeel : MonoBehaviour
         _releaseTime = Time.time;
         _airBallNotified = false;
         _groundRecallDone = false;
+        _wasReleasedFromShoot = true;
+        _shotGroundContactCount = 0;
         CancelDelayedGroundRecall();
     }
 
@@ -175,6 +188,7 @@ public class BallFeel : MonoBehaviour
 
         if (_groundLayer >= 0 && collision.gameObject.layer == _groundLayer)
         {
+            _shotGroundContactCount++;
             SpawnGroundRippleIfNeeded(collision);
             PlayClang(playGroundclip, randomPitch: true);
             ScheduleGroundRecall();
@@ -193,6 +207,14 @@ public class BallFeel : MonoBehaviour
             
             PlayClang(backboardClangClip);
         }
+    }
+
+    void OnCollisionExit(Collision collision)
+    {
+        if (IsHeld)
+            return;
+        if (_groundLayer >= 0 && collision.gameObject.layer == _groundLayer)
+            _shotGroundContactCount = Mathf.Max(0, _shotGroundContactCount - 1);
     }
 
     void ScheduleGroundRecall()
